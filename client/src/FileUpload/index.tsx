@@ -3,13 +3,13 @@ import { InboxOutlined } from '@ant-design/icons'
 import { Button, message } from 'antd'
 import useDrag, { PreviewInfo } from './hooks/useDrag'
 import { getFileName } from './utils'
-import {uploadFile} from './request'
+import { uploadFile } from './request'
 import styles from './index.module.less'
 
 enum UPLOAD_STATUS {
-  NOT_STARTED = 'NOT_STARTED', //初始状态，尚未开始上传
-  UPLOADING = 'UPLOADING',     //上传中
-  PAUSED = 'PAUSED'            //已暂停上传
+  NOT_STARTED = 'NOT_STARTED', // 初始状态，尚未开始上传
+  UPLOADING = 'UPLOADING',     // 上传中
+  PAUSED = 'PAUSED'            // 已暂停上传
 }
 
 export default function FileUpload() {
@@ -25,7 +25,13 @@ export default function FileUpload() {
 
     setUploadStatue(UPLOAD_STATUS.UPLOADING)
     const fileName = await getFileName(selectedFile)
-    uploadFile(selectedFile, fileName)
+    console.log(fileName);
+    const res = await uploadFile(selectedFile, fileName)
+    if(res) {
+      message.success('上传成功')
+    } else {
+      message.error('上传失败')
+    }
   }
   const pauseUpload = () => {
     

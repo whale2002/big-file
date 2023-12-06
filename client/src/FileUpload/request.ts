@@ -31,10 +31,10 @@ export async function uploadFile(file: File, fileName: string) {
   try {
     await Promise.all(uploadPromises);
     await request.get(`/merge/${fileName}`);
-    message.success("上传成功");
+    return true;
   } catch (e) {
     console.log("上传错误", e);
-    message.error("上传失败");
+    return false;
   }
 }
 

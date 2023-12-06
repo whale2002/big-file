@@ -10,8 +10,18 @@ export async function getFileName(file: File) {
  */
 async function calculateFileHash(file: File) {
   const arrayBuffer = await file.arrayBuffer(); // 获取文件的二进制内容
-  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
-  return bufferToHex(hashBuffer);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer); // 对arrayBuffer进行哈希计算，加密
+  return bufferToHex(hashBuffer); // 将hashBuffer转换为十六进制字符串
+
+  // 或者使用FileReader，需要结合 promise 使用
+  // const fileReader = new FileReader();
+  // fileReader.readAsArrayBuffer(file);
+  // fileReader.onload = (e) => {
+  //   const arrayBuffer = e.target?.result as ArrayBuffer;
+  //   const hashBuffer = crypto.subtle.digest("SHA-256", arrayBuffer);
+  //   const hash = bufferToHex(hashBuffer);
+  //   resolve(hash);
+  // };
 }
 
 /**
@@ -20,7 +30,7 @@ async function calculateFileHash(file: File) {
  * @returns 十六进制字符串
  */
 function bufferToHex(buffer: ArrayBuffer) {
-  return Array.prototype.map
-    .call(new Uint8Array(buffer), (x) => ("00" + x.toString(16)).slice(-2))
+  return Array.from(new Uint8Array(buffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
