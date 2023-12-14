@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { InboxOutlined } from '@ant-design/icons'
 import { Button, message } from 'antd'
-import useDrag, { PreviewInfo } from './hooks/useDrag'
+import useDrag from './hooks/useDrag'
+import type { PreviewInfo } from './hooks/useDrag'
 import { getFileName } from './utils'
-import { uploadFile } from './request'
+import { request } from './request'
 import styles from './index.module.less'
 
+// 每个切片的大小 100MB
+const CHUNK_SIZE = 100 * 1024 * 1024;
 enum UPLOAD_STATUS {
   NOT_STARTED = 'NOT_STARTED', // 初始状态，尚未开始上传
   UPLOADING = 'UPLOADING',     // 上传中
@@ -67,7 +70,6 @@ export default function FileUpload() {
 
   useEffect(() => {
     if(!selectedFile) return
-
   }, [selectedFile])
 
   return (
@@ -78,4 +80,46 @@ export default function FileUpload() {
       {renderButton(uploadStatue)}
     </div>
   )
+}
+
+// key: 核心代码
+export async function uploadFile(file: File, fileName: string) {
+  const chunks = createFileChunk(file, fileName);
+  const uploadPromises = chunks.map(({ chunk, chunkName }) => {
+    return uploadChunk(fileName, chunkName, chunk);
+  });
+
+  try {
+    await Promise.all(uploadPromises);
+    await request.get(`/merge/${fileName}`);
+    return true;
+  } catch (e) {
+    console.log("上传错误", e);
+    return false;
+  }
+}
+
+function createFileChunk(file: File, fileName: string) {
+  const chunks: { chunk: Blob; chunkName: string }[] = [];
+  const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
+
+  for (let i = 0; i < chunkCount; i++) {
+    const chunk = file.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    chunks.push({
+      chunk,
+      chunkName: `${fileName}-${i}`,
+    });
+  }
+  return chunks;
+}
+
+function uploadChunk(fileName: string, chunkName: string, chunk: Blob) {
+  return request.post(`/upload/${fileName}`, chunk, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+    },
+    params: {
+      chunkName,
+    },
+  });
 }
