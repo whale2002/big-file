@@ -3,7 +3,6 @@ const logger = require("morgan");
 const cors = require("cors");
 const fs = require("fs-extra");
 const path = require("path");
-const { StatusCodes } = require("http-status-codes");
 
 const CHUNK_SIZE = 1024 * 1024 * 100; // 100MB
 
@@ -56,6 +55,23 @@ app.get("/merge/:filename", async (req, res, next) => {
   }
 });
 
+app.get("/verify/:filename", async (req, res) => {
+  const { filename } = req.params;
+  const filePath = path.resolve(PUBLIC_DIR, filename);
+  const isExist = await fs.pathExists(filePath);
+  if (isExist) {
+    res.json({
+      success: true,
+      needUpload: false,
+    });
+  } else {
+    res.json({
+      success: true,
+      needUpload: true,
+    });
+  }
+});
+
 app.listen(8000, () => {
   console.log("Server is running on port 8000");
 });
@@ -82,10 +98,9 @@ async function mergeChunks(fileName) {
   try {
     // 并发读写
     const pipes = chunkFiles.map((chunkFile, index) => {
-      const rs = fs.createReadStream(
-        path.resolve(chunkDir, chunkFile),
-        { autoClose: true }
-      );
+      const rs = fs.createReadStream(path.resolve(chunkDir, chunkFile), {
+        autoClose: true,
+      });
       const ws = fs.createWriteStream(mergedFilePath, {
         start: index * CHUNK_SIZE,
       });

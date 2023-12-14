@@ -73,8 +73,17 @@ export default function useDrag(
     };
   }, [selectedFile]);
 
+  const resetFileStatus = () => {
+    setSelectedFile(undefined)
+    setPreviewInfo({
+      url: "",
+      type: "",
+    })
+  }
+
   return {
     selectedFile,
     previewInfo,
+    resetFileStatus
   };
 }
