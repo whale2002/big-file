@@ -24,8 +24,8 @@ app.post("/upload/:filename", async (req, res, next) => {
   const { filename } = req.params;
   // 通过查询参数获取分片名
   const { chunkName } = req.query;
-
-  const start = req.query.start ? parseInt(req.query.start) : 0;
+  const start = req.query.start ? parseInt(req.query.start) : 0;  
+  console.log(start, "start");
 
   const tempFileDir = path.resolve(TEMP_DIR, filename); // 临时目录
   const chunkFilePath = path.resolve(tempFileDir, chunkName); // 临时文件路径地址
@@ -33,6 +33,9 @@ app.post("/upload/:filename", async (req, res, next) => {
   const ws = fs.createWriteStream(chunkFilePath, {
     start,
     flags: "a",
+  });
+  req.on("aborted", () => {
+    ws.close();
   });
 
   try {
@@ -116,7 +119,7 @@ function pipeStream(rs, ws) {
 async function mergeChunks(fileName) {
   const mergedFilePath = path.resolve(PUBLIC_DIR, fileName);
   const chunkDir = path.resolve(TEMP_DIR, fileName);
-  const chunkFiles = fs.readdirSync(chunkDir);
+  const chunkFiles = await fs.readdir(chunkDir);
   chunkFiles.sort((a, b) => Number(a.split("-")[1]) - Number(b.split("-")[1]));
 
   try {
@@ -131,7 +134,7 @@ async function mergeChunks(fileName) {
       return pipeStream(rs, ws);
     });
     await Promise.all(pipes);
-    await fs.rmdir(chunkDir, { recursive: true });
+    await fs.remove(chunkDir);
   } catch (error) {
     throw error;
   }

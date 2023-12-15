@@ -226,7 +226,15 @@ function createFileChunk(file: File, fileName: string) {
   return chunks;
 }
 
-function uploadChunk(fileName: string, chunkName: string, chunk: Blob, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, cancelToken: CancelTokenSource, start: number, totalSize: number) {
+function uploadChunk(
+  fileName: string, 
+  chunkName: string, 
+  chunk: Blob, 
+  setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, 
+  cancelToken: CancelTokenSource, 
+  start: number, 
+  totalSize: number
+) {
   return request.post(`/upload/${fileName}`, chunk, {
     headers: {
       "Content-Type": "application/octet-stream",
