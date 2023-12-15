@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { InboxOutlined } from '@ant-design/icons'
+import axios from '@whale2002/ts-axios'
 import { Button, message, Progress } from 'antd'
 import useDrag from './hooks/useDrag'
-import type { PreviewInfo } from './hooks/useDrag'
 import { getFileName } from './utils'
 import { request } from './request'
+import type { CancelTokenSource } from '@whale2002/ts-axios'
+import type { PreviewInfo } from './hooks/useDrag'
 import styles from './index.module.less'
 
 // 每个切片的大小 100MB
@@ -22,6 +24,7 @@ export default function FileUpload() {
   const {selectedFile, previewInfo, resetFileStatus} = useDrag(uploadContainerRef)
   const [uploadStatue, setUploadStatue] = useState<UPLOAD_STATUS>(UPLOAD_STATUS.NOT_STARTED)
   const [uploadProgress, setUploadProgress] = useState<Record<string, any>>({})
+  const [cancelTokens, setCancelTokens] = useState<CancelTokenSource[]>([]) // 所有上传请求的取消 token
 
   const reset = () => {
     setUploadStatue(UPLOAD_STATUS.NOT_STARTED)
@@ -35,23 +38,26 @@ export default function FileUpload() {
     }
 
     setUploadStatue(UPLOAD_STATUS.UPLOADING)
-    const fileName = await getFileName(selectedFile)
+    const fileName = await getFileName(selectedFile) // 获取文件hash
     console.log(fileName);
-    const res = await uploadFile(selectedFile, fileName, setUploadProgress)
-    if(res?.success) {
+    const res = await uploadFile(selectedFile, fileName, setUploadProgress, setCancelTokens)
+    if(res.success) {
       message.success(res.message)
       if(res.needUpload !== undefined) {
         reset()
       } else {
-        setUploadStatue(UPLOAD_STATUS.SUCCESS)
+        setUploadStatue(res.status as UPLOAD_STATUS)
       }
     } else {
       message.error(res?.message)
-      setUploadStatue(UPLOAD_STATUS.FAILED)
+      setUploadStatue(res.status!)
     }
   }
   const pauseUpload = () => {
-    
+    setUploadStatue(UPLOAD_STATUS.PAUSED)
+    cancelTokens.forEach((cancelToken) => {
+      cancelToken.cancel('用户主动暂停了')
+    })
   }
 
   const renderButton = (status: UPLOAD_STATUS) => {
@@ -131,7 +137,7 @@ export default function FileUpload() {
 }
 
 // key: 核心代码
-export async function uploadFile(file: File, fileName: string, setUploadProgress: React.Dispatch<React.SetStateAction<{}>>) {
+export async function uploadFile(file: File, fileName: string, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, setCancelTokens: React.Dispatch<React.SetStateAction<CancelTokenSource[]>>) {
   const isExistRes = await request.get<{ needUpload: boolean, success: boolean }>(`/verify/${fileName}`)
   if(!isExistRes.data.needUpload) {
     return {
@@ -141,22 +147,38 @@ export async function uploadFile(file: File, fileName: string, setUploadProgress
     }
   }
   const chunks = createFileChunk(file, fileName);
+  const newCancelTokens: CancelTokenSource[] = []
+  const newUploadProgress = Object.create(null)
   const uploadPromises = chunks.map(({ chunk, chunkName }) => {
-    return uploadChunk(fileName, chunkName, chunk, setUploadProgress);
+    const cancelToken = axios.CancelToken.source()
+    newCancelTokens.push(cancelToken)
+    newUploadProgress[chunkName] = 0
+    return uploadChunk(fileName, chunkName, chunk, setUploadProgress, cancelToken);
   });
+  setCancelTokens(newCancelTokens)
+  setUploadProgress(newUploadProgress)
 
   try {
     await Promise.all(uploadPromises);
     await request.get(`/merge/${fileName}`);
     return {
       success: true,
-      message: '上传成功'
+      message: '上传成功',
+      status: UPLOAD_STATUS.SUCCESS
     };
   } catch (e) {
     console.log("上传错误", e);
+    if(axios.isCancel(e)) {
+      return {
+        success: false,
+        message: '取消上传',
+        status: UPLOAD_STATUS.PAUSED
+      }
+    }
     return {
       success: false,
-      message: '上传失败'
+      message: '上传失败',
+      status: UPLOAD_STATUS.FAILED
     };
   }
 }
@@ -175,7 +197,7 @@ function createFileChunk(file: File, fileName: string) {
   return chunks;
 }
 
-function uploadChunk(fileName: string, chunkName: string, chunk: Blob, setUploadProgress: React.Dispatch<React.SetStateAction<{}>>) {
+function uploadChunk(fileName: string, chunkName: string, chunk: Blob, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, cancelToken: CancelTokenSource) {
   return request.post(`/upload/${fileName}`, chunk, {
     headers: {
       "Content-Type": "application/octet-stream",
@@ -183,6 +205,7 @@ function uploadChunk(fileName: string, chunkName: string, chunk: Blob, setUpload
     params: {
       chunkName,
     },
+    cancelToken: cancelToken.token,
     onUploadProgress: (e: ProgressEvent) => {
       const percent = Math.round((e.loaded / e.total) * 100);
       setUploadProgress((preProcess) => ({
