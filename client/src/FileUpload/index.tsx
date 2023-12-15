@@ -43,12 +43,15 @@ export default function FileUpload() {
     const res = await uploadFile(selectedFile, fileName, setUploadProgress, setCancelTokens)
     if(res.success) {
       message.success(res.message)
-      if(res.needUpload !== undefined) {
+      if(typeof res.needUpload === 'boolean') {
+        // 秒传，清空
         reset()
       } else {
-        setUploadStatue(res.status as UPLOAD_STATUS)
+        // 上传成功 UPLOAD_STATUS.SUCCESS
+        setUploadStatue(res.status!)
       }
     } else {
+      // 取消上传或者上传失败
       message.error(res?.message)
       setUploadStatue(res.status!)
     }
@@ -137,9 +140,18 @@ export default function FileUpload() {
 }
 
 // key: 核心代码
+interface VerifyRes {
+  needUpload: boolean,
+  success: boolean,
+  uploadedChunkList: {
+    chunkFileName: string,
+    size: number
+  }[]
+}
 export async function uploadFile(file: File, fileName: string, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, setCancelTokens: React.Dispatch<React.SetStateAction<CancelTokenSource[]>>) {
-  const isExistRes = await request.get<{ needUpload: boolean, success: boolean }>(`/verify/${fileName}`)
-  if(!isExistRes.data.needUpload) {
+  const isExistRes = await request.get<VerifyRes>(`/verify/${fileName}`)
+  const { needUpload, uploadedChunkList = [] } = isExistRes.data
+  if(!needUpload) {
     return {
       success: isExistRes.data.success,
       needUpload: isExistRes.data.needUpload,
@@ -148,15 +160,32 @@ export async function uploadFile(file: File, fileName: string, setUploadProgress
   }
   const chunks = createFileChunk(file, fileName);
   const newCancelTokens: CancelTokenSource[] = []
-  const newUploadProgress = Object.create(null)
   const uploadPromises = chunks.map(({ chunk, chunkName }) => {
     const cancelToken = axios.CancelToken.source()
     newCancelTokens.push(cancelToken)
-    newUploadProgress[chunkName] = 0
-    return uploadChunk(fileName, chunkName, chunk, setUploadProgress, cancelToken);
+
+    const existChunk = uploadedChunkList.find(uploadedChunk => uploadedChunk.chunkFileName === chunkName)
+    if(existChunk) {
+      const uploadedSize = existChunk.size; // 已经上传的大小
+      const remainingChunk = chunk.slice(uploadedSize)
+      if(remainingChunk.size === 0) {
+        // 上传完了，不需要再上传
+        setUploadProgress((preProgress) => ({
+          ...preProgress,
+          [chunkName]: 100
+        }))
+        return Promise.resolve()
+      } 
+      setUploadProgress((preProgress) => ({
+        ...preProgress,
+        [chunkName]: Math.round((uploadedSize / chunk.size) * 100)
+      }))
+      return uploadChunk(fileName, chunkName, remainingChunk, setUploadProgress, cancelToken, uploadedSize, chunk.size)
+    } else {
+      return uploadChunk(fileName, chunkName, chunk, setUploadProgress, cancelToken, 0, chunk.size);
+    }
   });
   setCancelTokens(newCancelTokens)
-  setUploadProgress(newUploadProgress)
 
   try {
     await Promise.all(uploadPromises);
@@ -197,17 +226,18 @@ function createFileChunk(file: File, fileName: string) {
   return chunks;
 }
 
-function uploadChunk(fileName: string, chunkName: string, chunk: Blob, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, cancelToken: CancelTokenSource) {
+function uploadChunk(fileName: string, chunkName: string, chunk: Blob, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, cancelToken: CancelTokenSource, start: number, totalSize: number) {
   return request.post(`/upload/${fileName}`, chunk, {
     headers: {
       "Content-Type": "application/octet-stream",
     },
     params: {
       chunkName,
+      start,
     },
     cancelToken: cancelToken.token,
     onUploadProgress: (e: ProgressEvent) => {
-      const percent = Math.round((e.loaded / e.total) * 100);
+      const percent = Math.round((e.loaded + start) * 100 / totalSize);
       setUploadProgress((preProcess) => ({
         ...preProcess,
         [chunkName]: percent,

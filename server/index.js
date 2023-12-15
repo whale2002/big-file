@@ -25,10 +25,13 @@ app.post("/upload/:filename", async (req, res, next) => {
   // 通过查询参数获取分片名
   const { chunkName } = req.query;
 
+  const start = req.query.start ? parseInt(req.query.start) : 0;
+
   const tempFileDir = path.resolve(TEMP_DIR, filename); // 临时目录
   const chunkFilePath = path.resolve(tempFileDir, chunkName); // 临时文件路径地址
   await fs.ensureDir(tempFileDir); // 确保存在
   const ws = fs.createWriteStream(chunkFilePath, {
+    start,
     flags: "a",
   });
 
@@ -60,16 +63,37 @@ app.get("/verify/:filename", async (req, res) => {
   const filePath = path.resolve(PUBLIC_DIR, filename);
   const isExist = await fs.pathExists(filePath);
   if (isExist) {
-    res.json({
+    return res.json({
       success: true,
       needUpload: false,
     });
-  } else {
-    res.json({
+  }
+
+  const tempDir = path.resolve(TEMP_DIR, filename);
+  const isDirexist = await fs.pathExists(tempDir);
+  console.log(tempDir, isDirexist);
+
+  if (isDirexist) {
+    const chunkFiles = fs.readdirSync(tempDir);
+    const uploadedChunkList = await Promise.all(
+      chunkFiles.map(async (chunkFileName) => {
+        const { size } = await fs.stat(path.resolve(tempDir, chunkFileName));
+        return {
+          chunkFileName,
+          size,
+        };
+      })
+    );
+    return res.json({
       success: true,
       needUpload: true,
+      uploadedChunkList,
     });
   }
+  return res.json({
+    success: true,
+    needUpload: true,
+  });
 });
 
 app.listen(8000, () => {
