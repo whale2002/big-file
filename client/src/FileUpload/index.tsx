@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { InboxOutlined } from '@ant-design/icons'
 import axios from '@whale2002/ts-axios'
-import { Button, message, Progress } from 'antd'
-import useDrag from './hooks/useDrag'
-import { getFileName } from './utils'
+import { Button, message, Progress, Spin } from 'antd'
+import useDrag from './hooks/useFile'
+// import { getFileName } from './utils'
 import { request } from './request'
 import type { CancelTokenSource } from '@whale2002/ts-axios'
-import type { PreviewInfo } from './hooks/useDrag'
+import type { PreviewInfo } from './hooks/useFile'
 import styles from './index.module.less'
 
 // 每个切片的大小 100MB
@@ -25,6 +25,8 @@ export default function FileUpload() {
   const [uploadStatue, setUploadStatue] = useState<UPLOAD_STATUS>(UPLOAD_STATUS.NOT_STARTED)
   const [uploadProgress, setUploadProgress] = useState<Record<string, any>>({})
   const [cancelTokens, setCancelTokens] = useState<CancelTokenSource[]>([]) // 所有上传请求的取消 token
+  const [fileNameWorker, setFileNameWorker] = useState<Worker>()
+  const [isCalculatingFileName, setIsCalculatingFileName] = useState(false)
 
   const reset = () => {
     setUploadStatue(UPLOAD_STATUS.NOT_STARTED)
@@ -38,22 +40,32 @@ export default function FileUpload() {
     }
 
     setUploadStatue(UPLOAD_STATUS.UPLOADING)
-    const fileName = await getFileName(selectedFile) // 获取文件hash
-    console.log(fileName);
-    const res = await uploadFile(selectedFile, fileName, setUploadProgress, setCancelTokens)
-    if(res.success) {
-      message.success(res.message)
-      if(typeof res.needUpload === 'boolean') {
-        // 秒传，清空
-        reset()
+
+    if(!fileNameWorker) return
+
+    // 向 worker 发送文件，让它计算文件名
+    fileNameWorker.postMessage(selectedFile)
+    setIsCalculatingFileName(true)
+
+    // 监听，接收计算好的文件名
+    fileNameWorker.onmessage = async (event) => {
+      setIsCalculatingFileName(false)
+      console.log(event.data);
+      const res = await uploadFile(selectedFile, event.data, setUploadProgress, setCancelTokens)
+      if(res.success) {
+        message.success(res.message)
+        if(typeof res.needUpload === 'boolean') {
+          // 秒传，清空
+          reset()
+        } else {
+          // 上传成功 UPLOAD_STATUS.SUCCESS
+          setUploadStatue(res.status!)
+        }
       } else {
-        // 上传成功 UPLOAD_STATUS.SUCCESS
+        // 取消上传或者上传失败
+        message.error(res?.message)
         setUploadStatue(res.status!)
       }
-    } else {
-      // 取消上传或者上传失败
-      message.error(res?.message)
-      setUploadStatue(res.status!)
     }
   }
   const pauseUpload = () => {
@@ -117,8 +129,10 @@ export default function FileUpload() {
 
       return (
         <div style={{ width: '50%' }}>
-          {chunkProgress}
-          {totalProgress}
+          <Spin spinning={isCalculatingFileName}>
+            {chunkProgress}
+            {totalProgress}
+          </Spin>
         </div>
       )
     }
@@ -127,6 +141,11 @@ export default function FileUpload() {
   useEffect(() => {
     if(!selectedFile) return
   }, [selectedFile])
+
+  useEffect(() => {
+    const fileNameWorker = new Worker('/fileNameWorker.js')
+    setFileNameWorker(fileNameWorker)
+  }, [])
 
   return (
     <div className={styles.container}>
@@ -148,7 +167,7 @@ interface VerifyRes {
     size: number
   }[]
 }
-export async function uploadFile(file: File, fileName: string, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, setCancelTokens: React.Dispatch<React.SetStateAction<CancelTokenSource[]>>) {
+export async function uploadFile(file: File, fileName: string, setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, setCancelTokens: React.Dispatch<React.SetStateAction<CancelTokenSource[]>>, retryCount: number = 0) {
   const isExistRes = await request.get<VerifyRes>(`/verify/${fileName}`)
   const { needUpload, uploadedChunkList = [] } = isExistRes.data
   if(!needUpload) {
@@ -204,6 +223,10 @@ export async function uploadFile(file: File, fileName: string, setUploadProgress
         status: UPLOAD_STATUS.PAUSED
       }
     }
+    if(retryCount < 3) {
+      console.log('上传出错，重试中');
+      return uploadFile(file, fileName, setUploadProgress, setCancelTokens, retryCount + 1);
+    }
     return {
       success: false,
       message: '上传失败',
@@ -227,12 +250,12 @@ function createFileChunk(file: File, fileName: string) {
 }
 
 function uploadChunk(
-  fileName: string, 
-  chunkName: string, 
-  chunk: Blob, 
-  setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>, 
-  cancelToken: CancelTokenSource, 
-  start: number, 
+  fileName: string,
+  chunkName: string,
+  chunk: Blob,
+  setUploadProgress: React.Dispatch<React.SetStateAction<Record<string, any>>>,
+  cancelToken: CancelTokenSource,
+  start: number,
   totalSize: number
 ) {
   return request.post(`/upload/${fileName}`, chunk, {

@@ -8,7 +8,7 @@ export type PreviewInfo = {
   type: string;
 };
 
-export default function useDrag(
+export default function useFile(
   uploadContainerRef: React.RefObject<HTMLElement>
 ) {
   const [selectedFile, setSelectedFile] = useState<File>();
@@ -25,10 +25,6 @@ export default function useDrag(
     }
     if (file.size > MAX_FILE_SIZE) {
       message.error("文件大小超过2G");
-      return;
-    }
-    if (!(file.type.startsWith("image/") || file.type.startsWith("video/"))) {
-      message.error("请选择图片或视频");
       return;
     }
     setSelectedFile(file);
@@ -62,6 +58,24 @@ export default function useDrag(
   }, []);
 
   useEffect(() => {
+    const uploadContainer = uploadContainerRef.current;
+    if (!uploadContainer) return;
+    uploadContainer.addEventListener("click", () => {
+      // 动态创建 input 标签
+      const fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.style.display = "none";
+      fileInput.addEventListener("change", (event) => {
+        const files = (event.target as HTMLInputElement)!.files;
+        if (!files) return;
+        checkFile(files);
+      });
+      document.body.appendChild(fileInput);
+      fileInput.click();
+    });
+  }, []);
+
+  useEffect(() => {
     if (!selectedFile) return;
     const url = URL.createObjectURL(selectedFile);
     setPreviewInfo({
@@ -74,16 +88,16 @@ export default function useDrag(
   }, [selectedFile]);
 
   const resetFileStatus = () => {
-    setSelectedFile(undefined)
+    setSelectedFile(undefined);
     setPreviewInfo({
       url: "",
       type: "",
-    })
-  }
+    });
+  };
 
   return {
     selectedFile,
     previewInfo,
-    resetFileStatus
+    resetFileStatus,
   };
 }
